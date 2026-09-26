@@ -6,8 +6,8 @@ local QTIP = LibStub("LibQTip-1.0")
 local DUMP = LibStub("LibTextDump-1.0")
 
 local tinsert, tsort, tconcat, tremove = table.insert, table.sort, table.concat, table.remove
-local mfloor, min, mfmod = math.floor, math.min, math.fmod
-local sgsub, sbyte, slower, srep = string.gsub, string.byte, string.lower, string.rep
+local mfloor, min, mfmod, max = math.floor, math.min, math.fmod, math.max
+local sgsub, sbyte, slower, srep, smatch = string.gsub, string.byte, string.lower, string.rep, string.match
 local GetAchievementCriteriaInfo = GetAchievementCriteriaInfo
 local GetHonorRewardInfo = C_PvP.GetHonorRewardInfo
 local GetCurrencyInfo = C_CurrencyInfo.GetCurrencyInfo
@@ -18,6 +18,9 @@ local IsInBrawl = C_PvP.IsInBrawl
 local CanSurrenderArena = CanSurrenderArena
 local SurrenderArena = SurrenderArena
 local StaticPopup_Hide = StaticPopup_Hide
+
+-- Blizzard's Solo Shuffle deserter penalty; no completed game comes close to it
+local SHUFFLE_LEAVER_PENALTY = -150
 
 function RE:GetPlayerData(databaseID)
 	return RE.Database[databaseID].Players[RE.Database[databaseID].PlayerNum]
@@ -77,7 +80,17 @@ end
 
 function RE:GetArenaTeamIcons(databaseID, player)
 	if RE.Database[databaseID].isSoloShuffle and not player then
-		return srep("|TInterface\\RaidFrame\\ReadyCheck-Ready:12:12:0:0|t", RE.Database[databaseID].PlayerStats[1])..srep("|TInterface\\RaidFrame\\ReadyCheck-NotReady:12:12:0:0|t", (6 - RE.Database[databaseID].PlayerStats[1]))
+		local won, lost, kind = RE:GetShuffleRecord(databaseID)
+		if kind == "void" then
+			return "-"
+		end
+		local icons = srep("|TInterface\\RaidFrame\\ReadyCheck-Ready:12:12:0:0|t", won)..srep("|TInterface\\RaidFrame\\ReadyCheck-NotReady:12:12:0:0|t", lost)
+		if kind == "leaver" then
+			icons = icons.." |TInterface\\DialogFrame\\UI-Dialog-Icon-AlertNew:12:12:0:0|t"
+		elseif kind == "manual" then
+			icons = icons.." |TInterface\\Buttons\\UI-GuildButton-PublicNote-Up:12:12:0:0|t"
+		end
+		return icons
 	end
 	local faction = RE:GetFactionID(databaseID, player)
 	local teamRaw, team = {}, {}
@@ -202,6 +215,71 @@ function RE:GetRGBTeamDetails(databaseID, player)
 	return team, RE:AbbreviateNumbers(damageSum), RE:AbbreviateNumbers(healingSum), kbSum
 end
 
+function RE:GetShuffleRecord(databaseID)
+	local data = RE.Database[databaseID]
+	if not data then
+		return 0, 0, "normal"
+	end
+	local override = data.ShuffleOverride
+	if type(override) == "table" and tonumber(override[1]) and tonumber(override[2]) then
+		return tonumber(override[1]), tonumber(override[2]), "manual"
+	end
+	local won = data.PlayerStats and tonumber(data.PlayerStats[1]) or 0
+	local players = data.Players
+	if data.isRated and type(players) == "table" and data.PlayerNum and type(players[data.PlayerNum]) == "table" then
+		local me = players[data.PlayerNum]
+		if won == 0 and tonumber(me[13]) == 0 and (tonumber(me[12]) or 0) > 0 then
+			return 0, 0, "void"
+		end
+		for i=1, #players do
+			local change = i ~= data.PlayerNum and type(players[i]) == "table" and tonumber(players[i][13])
+			if change and change <= SHUFFLE_LEAVER_PENALTY then
+				return won, 0, "leaver"
+			end
+		end
+	end
+	return won, max(0, 6 - won), "normal"
+end
+
+function RE:SetShuffleOverride(databaseID, won, lost)
+	local data = RE.Database[databaseID]
+	if not data or not data.isSoloShuffle then
+		return
+	end
+	if won and lost then
+		data.ShuffleOverride = {won, lost}
+	else
+		data.ShuffleOverride = nil
+	end
+	for i=1, #RE.ArenaData do
+		if RE.ArenaData[i][11] == databaseID then
+			RE.ArenaData[i][5] = RE:GetArenaTeamIcons(databaseID, false)
+			break
+		end
+	end
+	RE.LDBUpdate = true
+	RE:UpdateLDB()
+	RE:UpdateGUI()
+end
+
+function RE:SetShuffleOverrideFromText(databaseID, text)
+	local won, lost = smatch(text or "", "^%s*(%d+)%s*%-%s*(%d+)%s*$")
+	won, lost = tonumber(won), tonumber(lost)
+	if not won or not lost or won > 6 or lost > 6 or won + lost > 6 then
+		print("\124cFF74D06C[REFlex]\124r "..L["Invalid input. Use won-lost, each 0-6, at most 6 rounds in total (e.g. 2-1)."])
+		return false
+	end
+	local data = RE.Database[databaseID]
+	if not (data and data.ShuffleOverride) then
+		local autoWon, autoLost = RE:GetShuffleRecord(databaseID)
+		if won == autoWon and lost == autoLost then
+			return true
+		end
+	end
+	RE:SetShuffleOverride(databaseID, won, lost)
+	return true
+end
+
 function RE:GetWinNumber(filter, arena)
 	local won, lost = 0, 0
 	for i=1, #RE.Database do
@@ -219,9 +297,9 @@ function RE:GetWinNumber(filter, arena)
 					end
 				else
 					if filter == 1 or (filter == 2 and not RE.Database[i].isRated) or (filter == 3 and RE.Database[i].isRated) then
-						won = won + RE.Database[i].PlayerStats[1]
-						-- TODO: Handle better Solo Shuffles that had less than 6 rounds
-						-- lost = lost + (6 - RE.Database[i].PlayerStats[1])
+						local shuffleWon, shuffleLost = RE:GetShuffleRecord(i)
+						won = won + shuffleWon
+						lost = lost + shuffleLost
 					end
 				end
 			end

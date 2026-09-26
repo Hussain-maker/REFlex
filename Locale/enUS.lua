@@ -34,3 +34,10 @@ L["Are you sure you want to hide this entry?"] = true
 L["Easiest teams"] = true
 L["Hardest teams"] = true
 L["Most common teams"] = true
+
+L["Enter Solo Shuffle rounds as won-lost (e.g. 2-1)."] = true
+L["Reset to automatic"] = true
+L["Invalid input. Use won-lost, each 0-6, at most 6 rounds in total (e.g. 2-1)."] = true
+L["Leaver detected - losses not counted"] = true
+L["Void game - not counted"] = true
+L["Manually set"] = true

@@ -11,6 +11,7 @@ REFlex = RE
 local tinsert = table.insert
 local PanelTemplates_GetSelectedTab, PanelTemplates_SetTab, PanelTemplates_SetNumTabs = PanelTemplates_GetSelectedTab, PanelTemplates_SetTab, PanelTemplates_SetNumTabs
 local StaticPopup_Show = StaticPopup_Show
+local StaticPopup_Hide = StaticPopup_Hide
 local IsAltKeyDown = IsAltKeyDown
 local IsControlKeyDown = IsControlKeyDown
 local IsShiftKeyDown = IsShiftKeyDown
@@ -74,6 +75,7 @@ RE.ArenaData = {}
 RE.RatingChange = {0, 0, 0, 0, 0, 0, 0, 0, 0}
 RE.CalendarMode = 0
 RE.HideID = 0
+RE.ShuffleEditID = 0
 RE.Season = 0
 RE.LDBTime = 0
 RE.LDBA = ""
@@ -162,6 +164,9 @@ function RE:OnLoad(self)
 			if realRow ~= nil and IsAltKeyDown() and IsControlKeyDown() and IsShiftKeyDown() and button == "LeftButton" then
 				RE.HideID = data[realRow][11]
 				StaticPopup_Show("REFLEX_CONFIRMDELETE")
+			elseif realRow ~= nil and button == "RightButton" and RE.Database[data[realRow][11]].isSoloShuffle then
+				RE.ShuffleEditID = data[realRow][11]
+				StaticPopup_Show("REFLEX_SHUFFLEOVERRIDE")
 			end
 		end,
 		["OnEnter"] = function (_, cellFrame, data, _, _, realRow, _)
@@ -355,6 +360,36 @@ function RE:OnEvent(_, event, ...)
 			whileDead = true,
 			hideOnEscape = true,
 		}
+		StaticPopupDialogs["REFLEX_SHUFFLEOVERRIDE"] = {
+			text = L["Enter Solo Shuffle rounds as won-lost (e.g. 2-1)."],
+			button1 = SAVE,
+			button2 = CANCEL,
+			button3 = L["Reset to automatic"],
+			hasEditBox = true,
+			maxLetters = 7,
+			OnShow = function(self)
+				local editBox = self.GetEditBox and self:GetEditBox() or self.editBox
+				if editBox then
+					local won, lost = RE:GetShuffleRecord(RE.ShuffleEditID)
+					editBox:SetText(won.."-"..lost)
+					editBox:HighlightText()
+				end
+			end,
+			OnAccept = function(self)
+				local editBox = self.GetEditBox and self:GetEditBox() or self.editBox
+				return not RE:SetShuffleOverrideFromText(RE.ShuffleEditID, editBox and editBox:GetText())
+			end,
+			OnAlt = function() RE:SetShuffleOverride(RE.ShuffleEditID, nil) end,
+			EditBoxOnEnterPressed = function(self)
+				if RE:SetShuffleOverrideFromText(RE.ShuffleEditID, self:GetText()) then
+					StaticPopup_Hide("REFLEX_SHUFFLEOVERRIDE")
+				end
+			end,
+			EditBoxOnEscapePressed = function() StaticPopup_Hide("REFLEX_SHUFFLEOVERRIDE") end,
+			timeout = 0,
+			whileDead = true,
+			hideOnEscape = true,
+		}
 
 		RE.DumpFrame = DUMP:New("REFlex - CSV")
 
@@ -445,6 +480,13 @@ function RE:OnEnterTooltip(cellFrame, databaseID)
 			end
 			RE.Tooltip:AddSeparator(3)
 			RE.Tooltip:AddLine(nil, "|cFFFF141D"..damageSum.."|r", "|cFF00ff00"..healingSum.."|r")
+			local _, _, kind = RE:GetShuffleRecord(databaseID)
+			local source = (kind == "leaver" and L["Leaver detected - losses not counted"]) or (kind == "void" and L["Void game - not counted"]) or (kind == "manual" and L["Manually set"])
+			if source then
+				RE.Tooltip:AddSeparator(3)
+				local line = RE.Tooltip:AddLine()
+				RE.Tooltip:SetCell(line, 1, "|cFFFFD100"..source.."|r", nil, "CENTER", 3)
+			end
 		else
 			local team, damageSum, healingSum = RE:GetArenaTeamDetails(databaseID, true)
 			local teamEnemy, damageSumEnemy, healingSumEnemy = RE:GetArenaTeamDetails(databaseID, false)

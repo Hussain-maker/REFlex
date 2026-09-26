@@ -41,3 +41,5 @@ L["Invalid input. Use won-lost, each 0-6, at most 6 rounds in total (e.g. 2-1)."
 L["Leaver detected - losses not counted"] = true
 L["Void game - not counted"] = true
 L["Manually set"] = true
+L["Losses from season stats"] = true
+L["Losses estimated from season stats"] = true

@@ -76,6 +76,7 @@ RE.RatingChange = {0, 0, 0, 0, 0, 0, 0, 0, 0}
 RE.CalendarMode = 0
 RE.HideID = 0
 RE.ShuffleEditID = 0
+RE.ShuffleArm = false
 RE.Season = 0
 RE.LDBTime = 0
 RE.LDBA = ""
@@ -112,6 +113,7 @@ function RE:OnLoad(self)
 	self:RegisterEvent("PVP_MATCH_COMPLETE")
 	self:RegisterEvent("CHAT_MSG_ADDON")
 	self:RegisterEvent("PVP_RATED_STATS_UPDATE")
+	self:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 	self:RegisterEvent("CURRENCY_DISPLAY_UPDATE")
 	self:RegisterForDrag("LeftButton")
 	tinsert(UISpecialFrames,"REFlexFrame")
@@ -432,6 +434,16 @@ function RE:OnEvent(_, event, ...)
 				SendAddonMessage("REFlex", "Version;"..RE.Version, "GUILD")
 			end
 			REFlexBGFrameText:SetText("")
+			if instanceType == "arena" then
+				RE.Settings.ShuffleSnapshot = nil
+				RE.ShuffleArm = true
+				RequestRatedInfo()
+				TimerAfter(5, function()
+					if RE.ShuffleArm then
+						RequestRatedInfo()
+					end
+				end)
+			end
 		end
 	elseif event == "PVP_MATCH_COMPLETE" and not RE.DataSaved then
 		RE.DataSaved = true
@@ -443,6 +455,7 @@ function RE:OnEvent(_, event, ...)
 			local currentRating, _, _, _, _, _, _, bestRating = GetPersonalRatedInfo(i)
 			RE.RatingChange[i] = currentRating - bestRating
 		end
+		RE:UpdateShuffleRounds()
 		if RE.LDBTime == 0 then
 			RE:UpdateLDBTime()
 		end
@@ -453,6 +466,8 @@ function RE:OnEvent(_, event, ...)
 		if currency and quantity and currency == 1792 and quantity > 0 then
 			RE:ParseHonor(quantity)
 		end
+	elseif event == "PLAYER_SPECIALIZATION_CHANGED" and ... == "player" then
+		RequestRatedInfo()
 	end
 end
 
@@ -481,7 +496,7 @@ function RE:OnEnterTooltip(cellFrame, databaseID)
 			RE.Tooltip:AddSeparator(3)
 			RE.Tooltip:AddLine(nil, "|cFFFF141D"..damageSum.."|r", "|cFF00ff00"..healingSum.."|r")
 			local _, _, kind = RE:GetShuffleRecord(databaseID)
-			local source = (kind == "leaver" and L["Leaver detected - losses not counted"]) or (kind == "void" and L["Void game - not counted"]) or (kind == "manual" and L["Manually set"])
+			local source = (kind == "leaver" and L["Leaver detected - losses not counted"]) or (kind == "void" and L["Void game - not counted"]) or (kind == "manual" and L["Manually set"]) or (kind == "reconciled" and L["Losses from season stats"]) or (kind == "estimated" and L["Losses estimated from season stats"])
 			if source then
 				RE.Tooltip:AddSeparator(3)
 				local line = RE.Tooltip:AddLine()
@@ -1006,4 +1021,7 @@ function RE:PVPEnd()
 		print("\124cFF74D06C[REFlex]\124r "..L["API returned corrupted data. Match will not be recorded."])
 	end
 	PVPMatchResults.buttonContainer.leaveButton:Enable()
+	if RE:BindShuffleSnapshot(#RE.Database) then
+		RequestRatedInfo()
+	end
 end

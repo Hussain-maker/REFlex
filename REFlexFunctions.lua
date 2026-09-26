@@ -18,6 +18,13 @@ local IsInBrawl = C_PvP.IsInBrawl
 local CanSurrenderArena = CanSurrenderArena
 local SurrenderArena = SurrenderArena
 local StaticPopup_Hide = StaticPopup_Hide
+local GetPersonalRatedInfo = GetPersonalRatedInfo
+local GetSpecialization = C_SpecializationInfo.GetSpecialization or GetSpecialization
+local GetSpecializationInfo = GetSpecializationInfo
+local IsRatedSoloShuffle = C_PvP.IsRatedSoloShuffle
+local IsMatchComplete = C_PvP.IsMatchComplete
+local IsInInstance = IsInInstance
+local RequestRatedInfo = RequestRatedInfo
 
 -- Blizzard's Solo Shuffle deserter penalty; no completed game comes close to it
 local SHUFFLE_LEAVER_PENALTY = -150
@@ -89,6 +96,8 @@ function RE:GetArenaTeamIcons(databaseID, player)
 			icons = icons.." |TInterface\\DialogFrame\\UI-Dialog-Icon-AlertNew:12:12:0:0|t"
 		elseif kind == "manual" then
 			icons = icons.." |TInterface\\Buttons\\UI-GuildButton-PublicNote-Up:12:12:0:0|t"
+		elseif kind == "estimated" then
+			icons = icons.." |TInterface\\RaidFrame\\ReadyCheck-Waiting:12:12:0:0|t"
 		end
 		return icons
 	end
@@ -215,7 +224,7 @@ function RE:GetRGBTeamDetails(databaseID, player)
 	return team, RE:AbbreviateNumbers(damageSum), RE:AbbreviateNumbers(healingSum), kbSum
 end
 
-function RE:GetShuffleRecord(databaseID)
+function RE:GetShuffleRecord(databaseID, skipReconciled)
 	local data = RE.Database[databaseID]
 	if not data then
 		return 0, 0, "normal"
@@ -225,6 +234,14 @@ function RE:GetShuffleRecord(databaseID)
 		return tonumber(override[1]), tonumber(override[2]), "manual"
 	end
 	local won = data.PlayerStats and tonumber(data.PlayerStats[1]) or 0
+	local played = tonumber(data.ShuffleRoundsPlayed)
+	if played and played >= won and played <= 6 then
+		return won, played - won, "tracked"
+	end
+	local reconciled = data.ShuffleReconciled
+	if not skipReconciled and type(reconciled) == "table" and tonumber(reconciled[1]) then
+		return won, tonumber(reconciled[1]), reconciled[2] == "estimated" and "estimated" or "reconciled"
+	end
 	local players = data.Players
 	if data.isRated and type(players) == "table" and data.PlayerNum and type(players[data.PlayerNum]) == "table" then
 		local me = players[data.PlayerNum]
@@ -260,6 +277,7 @@ function RE:SetShuffleOverride(databaseID, won, lost)
 	RE.LDBUpdate = true
 	RE:UpdateLDB()
 	RE:UpdateGUI()
+	RequestRatedInfo()
 end
 
 function RE:SetShuffleOverrideFromText(databaseID, text)
@@ -278,6 +296,174 @@ function RE:SetShuffleOverrideFromText(databaseID, text)
 	end
 	RE:SetShuffleOverride(databaseID, won, lost)
 	return true
+end
+
+function RE:BindShuffleSnapshot(databaseID)
+	local snapshot = RE.Settings.ShuffleSnapshot
+	local data = RE.Database[databaseID]
+	if not snapshot or not data then
+		return false
+	end
+	if data.isSoloShuffle and data.isRated and not data.Hidden and not snapshot.Time and snapshot.Season == data.Season then
+		snapshot.Time = data.Time
+		return true
+	end
+	if data.isSoloShuffle or not snapshot.Time then
+		RE.Settings.ShuffleSnapshot = nil
+	end
+	return false
+end
+
+function RE:ApplyShuffleSnapshot(season, spec, played, won)
+	local snapshot = RE.Settings.ShuffleSnapshot
+	if not snapshot then
+		return
+	end
+	if snapshot.Season ~= season then
+		RE.Settings.ShuffleSnapshot = nil
+		return
+	end
+	if not snapshot.Time or snapshot.Spec ~= spec or played <= snapshot.Played then
+		return
+	end
+	RE.Settings.ShuffleSnapshot = nil
+	local deltaPlayed, deltaWon = played - snapshot.Played, won - snapshot.Won
+	for i=#RE.Database, 1, -1 do
+		local data = RE.Database[i]
+		if data.Time == snapshot.Time then
+			local roundsWon = data.PlayerStats and tonumber(data.PlayerStats[1])
+			if data.isSoloShuffle and data.isRated and roundsWon and deltaWon == roundsWon and deltaPlayed >= roundsWon and deltaPlayed <= 6 then
+				data.ShuffleRoundsPlayed = deltaPlayed
+				return i
+			end
+			return
+		end
+	end
+end
+
+function RE:ReconcileShuffle(season, spec, games, played, won, changed)
+	local scope, candidates = {}, {}
+	local sumWon, sumLost, capacity, sumXY, sumXX, usable = 0, 0, 0, 0, 0, 0
+	for i=1, #RE.Database do
+		local data = RE.Database[i]
+		local me = data.isSoloShuffle and data.isRated and not data.Hidden and data.Season == season and type(data.Players) == "table" and data.PlayerNum and data.Players[data.PlayerNum]
+		if type(me) == "table" and me[16] == spec then
+			local gameWon, gameLost, kind = RE:GetShuffleRecord(i, true)
+			local change = tonumber(me[13])
+			tinsert(scope, i)
+			sumWon = sumWon + gameWon
+			sumLost = sumLost + gameLost
+			if kind == "leaver" then
+				tinsert(candidates, {["ID"] = i, ["Won"] = gameWon, ["Cap"] = max(0, 5 - gameWon), ["Change"] = change or 0})
+				capacity = capacity + max(0, 5 - gameWon)
+			elseif kind == "normal" and change and change > SHUFFLE_LEAVER_PENALTY and gameWon ~= gameLost then
+				sumXY = sumXY + change * (gameWon - gameLost)
+				sumXX = sumXX + (gameWon - gameLost) * (gameWon - gameLost)
+				usable = usable + 1
+			end
+		end
+	end
+	-- Games Blizzard counted but REFlex never saved count as full 6-round games; inconsistent counts skip reconciliation
+	local lostGames, lostWon = games - #scope, won - sumWon
+	if lostGames < 0 or (lostGames == 0 and lostWon ~= 0) or (lostGames > 0 and (lostWon < 0 or lostWon > 6 * lostGames)) then
+		return
+	end
+	local lostLost = lostGames > 0 and (6 * lostGames - lostWon) or 0
+	local missing = played - won - sumLost - lostLost
+	if missing == 0 then
+		for _, i in ipairs(scope) do
+			if RE.Database[i].ShuffleReconciled then
+				RE.Database[i].ShuffleReconciled = nil
+				changed[i] = true
+			end
+		end
+		return
+	end
+	if #candidates == 0 or missing < 0 or missing > capacity then
+		return
+	end
+	local kind = "reconciled"
+	if #candidates == 1 then
+		candidates[1].Lost = missing
+	else
+		-- Rating per net round won, fitted through the origin on normal games
+		kind = "estimated"
+		local k = 15
+		if usable >= 5 and sumXY > 0 then
+			k = sumXY / sumXX
+		end
+		local total = 0
+		for _, c in ipairs(candidates) do
+			c.Ideal = min(c.Cap, max(0, c.Won - c.Change / k))
+			c.Lost = mfloor(c.Ideal)
+			total = total + c.Lost
+		end
+		while total < missing do
+			local best
+			for _, c in ipairs(candidates) do
+				if c.Lost < c.Cap and (not best or c.Ideal - c.Lost > best.Ideal - best.Lost) then
+					best = c
+				end
+			end
+			best.Lost = best.Lost + 1
+			total = total + 1
+		end
+		while total > missing do
+			local best
+			for _, c in ipairs(candidates) do
+				if c.Lost > 0 and (not best or c.Ideal - c.Lost < best.Ideal - best.Lost) then
+					best = c
+				end
+			end
+			best.Lost = best.Lost - 1
+			total = total - 1
+		end
+	end
+	for _, c in ipairs(candidates) do
+		local old = RE.Database[c.ID].ShuffleReconciled
+		if type(old) ~= "table" or old[1] ~= c.Lost or old[2] ~= kind then
+			RE.Database[c.ID].ShuffleReconciled = {c.Lost, kind}
+			changed[c.ID] = true
+		end
+	end
+end
+
+function RE:UpdateShuffleRounds()
+	local season = RE.Season
+	local specIndex = GetSpecialization()
+	local spec = specIndex and specIndex > 0 and select(2, GetSpecializationInfo(specIndex))
+	local games = select(4, GetPersonalRatedInfo(7))
+	local played, won = select(12, GetPersonalRatedInfo(7))
+	games, played, won = tonumber(games), tonumber(played), tonumber(won)
+	if not season or season < 1 or not spec or not played or not won then
+		return
+	end
+	local changed = {}
+	local trackedID = RE:ApplyShuffleSnapshot(season, spec, played, won)
+	if trackedID then
+		changed[trackedID] = true
+	end
+	if RE.ShuffleArm then
+		if RE.DataSaved or (IsMatchComplete and IsMatchComplete()) or select(2, IsInInstance()) ~= "arena" then
+			RE.ShuffleArm = false
+		elseif IsRatedSoloShuffle() then
+			RE.ShuffleArm = false
+			RE.Settings.ShuffleSnapshot = {["Season"] = season, ["Spec"] = spec, ["Played"] = played, ["Won"] = won}
+		end
+	end
+	if games and played > 0 and select(2, IsInInstance()) ~= "arena" then
+		RE:ReconcileShuffle(season, spec, games, played, won, changed)
+	end
+	if next(changed) then
+		for i=1, #RE.ArenaData do
+			if changed[RE.ArenaData[i][11]] then
+				RE.ArenaData[i][5] = RE:GetArenaTeamIcons(RE.ArenaData[i][11], false)
+			end
+		end
+		if REFlexFrame:IsVisible() then
+			RE:UpdateGUI()
+		end
+	end
 end
 
 function RE:GetWinNumber(filter, arena)

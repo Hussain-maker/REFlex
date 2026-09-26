@@ -24,7 +24,10 @@ local IsRatedArena = C_PvP.IsRatedArena
 local IsRatedBattleground = C_PvP.IsRatedBattleground
 local IsSoloRBG = C_PvP.IsSoloRBG
 local IsArenaSkirmish = IsArenaSkirmish
-local IsPlayerAtEffectiveMaxLevel = IsPlayerAtEffectiveMaxLevel
+-- Fallback: the global IsPlayerAtEffectiveMaxLevel was removed in Midnight
+local IsPlayerAtEffectiveMaxLevel = IsPlayerAtEffectiveMaxLevel or function()
+	return GetMaxLevelForPlayerExpansion and UnitLevel("player") >= GetMaxLevelForPlayerExpansion() or false
+end
 local SetBattlefieldScoreFaction = SetBattlefieldScoreFaction
 local GetAvailableBrawlInfo = C_PvP.GetAvailableBrawlInfo
 local GetBrawlRewards = C_PvP.GetBrawlRewards

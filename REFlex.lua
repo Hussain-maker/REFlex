@@ -80,6 +80,7 @@ RE.LDBA = ""
 RE.LDBB = ""
 RE.LDBUpdate = true
 RE.LDBData = {["Won"] = 0, ["Lost"] = 0, ["HK"] = 0, ["Honor"] = 0}
+RE.PlayerSearchText = ""
 
 RE.PlayerName = UnitName("PLAYER"):lower()
 RE.PlayerFaction = UnitFactionGroup("PLAYER") == "Horde" and 0 or 1
@@ -199,6 +200,20 @@ function RE:OnLoad(self)
 	RE.DateDropDown:SetWidth(100)
 	RE.DateDropDown:SetCallback("OnValueChanged", RE.OnDateChange)
 	RE.DateDropDown:SetList({[1] = ALL, [2] = L["Session"], [3] = HONOR_TODAY, [4] = HONOR_YESTERDAY, [5] = GUILD_CHALLENGES_THIS_WEEK, [6] = L["This month"], [7] = L["This season"], [8] = L["Prev. season"], [9] = CUSTOM})
+	RE.PlayerSearchBox = CreateFrame("EditBox", nil, REFlexFrame, "SearchBoxTemplate")
+	RE.PlayerSearchBox:SetSize(140, 20)
+	RE.PlayerSearchBox:SetPoint("TOPLEFT", REFlexFrame, "TOPLEFT", 22, -12)
+	RE.PlayerSearchBox.Instructions:SetText(L["Player name"])
+	RE.PlayerSearchBox:SetScript("OnEscapePressed", function(self)
+		self:SetText(RE.PlayerSearchText)
+		self:ClearFocus()
+	end)
+	RE.PlayerSearchBox:HookScript("OnEditFocusLost", function(self)
+		RE:SetPlayerSearch(self:GetText())
+	end)
+	RE.PlayerSearchBox.clearButton:HookScript("OnClick", function()
+		RE:SetPlayerSearch("")
+	end)
 end
 
 function RE:OnHide(_)
@@ -224,6 +239,7 @@ function RE:OnEvent(_, event, ...)
 		RE.Database = REFlexDatabase
 		RE.HDatabase = REFlexHonorDatabase
 		RE:UpdateSettings()
+		RE.Settings.Filters.Player = nil
 		RE:UpdateDatabase()
 		RE:HiddenPurge()
 

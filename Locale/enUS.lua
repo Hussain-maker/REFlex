@@ -7,6 +7,7 @@ L["This season"] = true
 L["Prev. season"] = true
 L["Current session"] = true
 L["Session"] = true
+L["Player name"] = true
 
 L["Hide minimap button"] = true
 L["Display server names"] = true

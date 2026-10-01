@@ -18,6 +18,7 @@ if ElvUI then
     S:HandleScrollBar(_G[REFlex.TableArena.frame:GetName().."ScrollFrameScrollBar"])
     S:HandleButton(REFlexFrame_DumpButton)
     S:HandleButton(REFlexFrame_StatsButton)
+    S:HandleEditBox(REFlex.PlayerSearchBox)
     S:HandleCloseButton(REFlexFrame_CloseButton)
     REFlexFrame_HKBar:StripTextures()
     S:HandleStatusBar(REFlexFrame_HKBar_I)

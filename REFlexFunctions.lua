@@ -514,6 +514,10 @@ function RE:NameClean(name)
 	end
 end
 
+function RE:NormaliseName(name)
+	return slower((strsplit("-", name)))
+end
+
 function RE:RatingChangeClean(change, databaseID)
 	if change > 0 then
 		return "|cFF00FF00+"..change.."|r"
@@ -634,21 +638,48 @@ function RE:DateFilter(rowdata)
 	end
 end
 
+function RE:SetPlayerSearch(text)
+	text = strtrim(text or "")
+	local name = strtrim(RE:NormaliseName(text))
+	if name == "" then
+		name = nil
+	end
+	RE.PlayerSearchText = text
+	if name ~= RE.Settings.Filters.Player then
+		RE.Settings.Filters.Player = name
+		RE:UpdateGUI()
+	end
+end
+
+function RE:PlayerFilter(rowdata)
+	local search = RE.Settings.Filters.Player
+	if not search then
+		return true
+	end
+	local players = RE.Database[rowdata[11]].Players
+	for i=1, #players do
+		if RE:NormaliseName(players[i][1]) == search then
+			return true
+		end
+	end
+	return false
+end
+
 function RE:FilterDefault(rowdata)
-	return not RE.Database[rowdata[11]].Hidden and RE:SpecFilter(rowdata) and RE:MapFilter(rowdata) and RE:BracketFilter(rowdata) and RE:DateFilter(rowdata)
+	return not RE.Database[rowdata[11]].Hidden and RE:SpecFilter(rowdata) and RE:MapFilter(rowdata) and RE:BracketFilter(rowdata) and RE:DateFilter(rowdata) and RE:PlayerFilter(rowdata)
 end
 
 function RE:FilterCasual(rowdata)
-	return not RE.Database[rowdata[11]].Hidden and not RE.Database[rowdata[11]].isRated and RE:SpecFilter(rowdata) and RE:MapFilter(rowdata) and RE:BracketFilter(rowdata) and RE:DateFilter(rowdata)
+	return not RE.Database[rowdata[11]].Hidden and not RE.Database[rowdata[11]].isRated and RE:SpecFilter(rowdata) and RE:MapFilter(rowdata) and RE:BracketFilter(rowdata) and RE:DateFilter(rowdata) and RE:PlayerFilter(rowdata)
 end
 
 function RE:FilterRated(rowdata)
-	return not RE.Database[rowdata[11]].Hidden and RE.Database[rowdata[11]].isRated and RE:SpecFilter(rowdata) and RE:MapFilter(rowdata) and RE:BracketFilter(rowdata) and RE:DateFilter(rowdata)
+	return not RE.Database[rowdata[11]].Hidden and RE.Database[rowdata[11]].isRated and RE:SpecFilter(rowdata) and RE:MapFilter(rowdata) and RE:BracketFilter(rowdata) and RE:DateFilter(rowdata) and RE:PlayerFilter(rowdata)
 end
 
 function RE:FilterStats(id, playerdata)
 	local data = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, id, 0, 0, playerdata[16], 0}
-	return not RE.Database[data[11]].Hidden and RE:SpecFilter(data) and RE:MapFilter(data) and RE:BracketFilter(data) and RE:DateFilter(data)
+	return not RE.Database[data[11]].Hidden and RE:SpecFilter(data) and RE:MapFilter(data) and RE:BracketFilter(data) and RE:DateFilter(data) and RE:PlayerFilter(data)
 end
 
 function RE:CalendarParser()

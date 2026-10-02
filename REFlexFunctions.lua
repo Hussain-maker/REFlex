@@ -8,6 +8,7 @@ local DUMP = LibStub("LibTextDump-1.0")
 local tinsert, tsort, tconcat, tremove = table.insert, table.sort, table.concat, table.remove
 local mfloor, min, mfmod = math.floor, math.min, math.fmod
 local sgsub, sbyte, slower, srep = string.gsub, string.byte, string.lower, string.rep
+local sformat, schar, sfind = string.format, string.char, string.find
 local GetAchievementCriteriaInfo = GetAchievementCriteriaInfo
 local GetHonorRewardInfo = C_PvP.GetHonorRewardInfo
 local GetCurrencyInfo = C_CurrencyInfo.GetCurrencyInfo
@@ -18,6 +19,21 @@ local IsInBrawl = C_PvP.IsInBrawl
 local CanSurrenderArena = CanSurrenderArena
 local SurrenderArena = SurrenderArena
 local StaticPopup_Hide = StaticPopup_Hide
+local PanelTemplates_SetTab = PanelTemplates_SetTab
+local IsInInstance = IsInInstance
+local IsSoloShuffle = C_PvP.IsSoloShuffle
+local GetNumBattlefieldScores = GetNumBattlefieldScores
+local GetBattlefieldScore = GetBattlefieldScore
+local RequestBattlefieldScoreData = RequestBattlefieldScoreData
+local TimerAfter = C_Timer.After
+local issecretvalue = issecretvalue
+local UnitName = UnitName
+local UnitClass = UnitClass
+local IsRatedArena = C_PvP.IsRatedArena
+local IsArenaSkirmish = IsArenaSkirmish
+local GetBattlefieldStatus = GetBattlefieldStatus
+local GetMaxBattlefieldID = GetMaxBattlefieldID
+local GetNumGroupMembers = GetNumGroupMembers
 
 function RE:GetPlayerData(databaseID)
 	return RE.Database[databaseID].Players[RE.Database[databaseID].PlayerNum]
@@ -647,7 +663,7 @@ function RE:DateFilter(rowdata)
 	end
 end
 
-function RE:SetPlayerSearch(text)
+function RE:SetPlayerSearch(text, internal)
 	text = strtrim(text or "")
 	local name, realm = RE:NormaliseName(text)
 	if name == "" then
@@ -659,7 +675,9 @@ function RE:SetPlayerSearch(text)
 		RE.PlayerSearchRealm = realm
 		-- Players from the user's own realm are stored without one
 		RE.PlayerSearchOwnRealm = NormaliseRealm(GetNormalizedRealmName() or "")
-		RE:UpdateGUI()
+		if not internal then
+			RE:UpdateGUI()
+		end
 	end
 end
 
@@ -677,6 +695,241 @@ function RE:PlayerFilter(rowdata)
 		end
 	end
 	return false
+end
+
+local function ArenaAlertDone()
+	return not RE.Settings or RE.Settings.ShuffleAlert == false or RE.DataSaved or (RE.ArenaSeen and RE.ArenaSeen.Num >= RE.ArenaSeen.Total)
+end
+
+local function MarkNewPlayer(name)
+	if type(name) == "string" and not (issecretvalue and issecretvalue(name)) and name ~= "" and name ~= UNKNOWNOBJECT then
+		local key = slower(name)
+		if key ~= RE.PlayerName and not RE.ArenaSeen.Seen[key] then
+			RE.ArenaSeen.Seen[key] = true
+			RE.ArenaSeen.Num = RE.ArenaSeen.Num + 1
+			return key
+		end
+	end
+end
+
+function RE:StartArenaAlert()
+	-- These fire constantly in the open world, so they are only listened to inside an arena
+	REFlexFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
+	REFlexFrame:RegisterEvent("ARENA_OPPONENT_UPDATE")
+	REFlexFrame:RegisterEvent("UNIT_NAME_UPDATE")
+	RE:RequestShuffleScores(1)
+end
+
+function RE:RequestShuffleScores(attempt)
+	-- Zone changes inside the arena would otherwise stack extra retry chains
+	if attempt == 1 and RE.ShuffleRetry then
+		return
+	end
+	if ArenaAlertDone() or attempt > 12 or select(2, IsInInstance()) ~= "arena" then
+		RE.ShuffleRetry = false
+		return
+	end
+	if IsSoloShuffle() then
+		RequestBattlefieldScoreData()
+	end
+	-- Catches a rated arena whose state was not ready when the first roster event fired
+	RE:CheckArenaPlayers()
+	RE.ShuffleRetry = true
+	TimerAfter(5, function() RE:RequestShuffleScores(attempt + 1) end)
+end
+
+function RE:CheckShuffleOpponents()
+	if ArenaAlertDone() or not IsSoloShuffle() then
+		return
+	end
+	-- A state started by the 2v2/3v3 path before IsSoloShuffle() was ready does not fit a shuffle
+	if not RE.ArenaSeen or RE.ArenaSeen.Size then
+		RE.ArenaSeen = {["Seen"] = {}, ["Num"] = 0, ["Total"] = 5}
+	end
+	local pending, order = {}, {}
+	for i=1, GetNumBattlefieldScores() do
+		local name, _, _, _, _, _, _, _, class = GetBattlefieldScore(i)
+		if issecretvalue and issecretvalue(class) then
+			class = nil
+		end
+		local key = MarkNewPlayer(name)
+		if key then
+			pending[key] = {["Name"] = name, ["Class"] = class, ["Games"] = 0, ["Won"] = 0, ["Lost"] = 0}
+			tinsert(order, pending[key])
+		end
+	end
+	if #order == 0 then
+		return
+	end
+	-- One pass for the whole batch so a large history does not cause a hitch
+	for i=1, #RE.Database do
+		local data = RE.Database[i]
+		if data.isSoloShuffle and not data.Hidden and type(data.Players) == "table" then
+			local won = tonumber(data.PlayerStats and data.PlayerStats[1])
+			for j=1, #data.Players do
+				local name = type(data.Players[j]) == "table" and data.Players[j][1]
+				local entry = type(name) == "string" and pending[slower(name)]
+				if entry then
+					entry.Games = entry.Games + 1
+					if won then
+						-- Same split as the round icons in the arena table
+						entry.Won = entry.Won + won
+						entry.Lost = entry.Lost + 6 - won
+					end
+				end
+			end
+		end
+	end
+	for _, entry in ipairs(order) do
+		local text
+		if entry.Games == 1 then
+			text = sformat(L["%s: 1 previous game (%d-%d rounds)"], RE:GetPlayerLink(entry.Name, entry.Class), entry.Won, entry.Lost)
+		elseif entry.Games > 1 then
+			text = sformat(L["%s: %d previous games (%d-%d rounds)"], RE:GetPlayerLink(entry.Name, entry.Class), entry.Games, entry.Won, entry.Lost)
+		end
+		if text then
+			print("\124cFF74D06C[REFlex]\124r "..text)
+		end
+	end
+end
+
+local function GetUnitFullName(unit)
+	local name, realm = UnitName(unit)
+	if (issecretvalue and (issecretvalue(name) or issecretvalue(realm))) or type(name) ~= "string" or name == "" or name == UNKNOWNOBJECT then
+		return nil
+	end
+	-- Own-realm units have no realm, matching the plain names REFlex stores for them
+	if type(realm) == "string" and realm ~= "" then
+		-- Stored names use the realm without spaces
+		return name.."-"..(sgsub(realm, " ", ""))
+	end
+	return name
+end
+
+local function GetArenaTeamSize()
+	-- The queue's team size stays right even if a teammate has not loaded in or has left
+	for i=1, GetMaxBattlefieldID() do
+		local status, _, teamSize = GetBattlefieldStatus(i)
+		if status == "active" and (teamSize == 2 or teamSize == 3) then
+			return teamSize
+		end
+	end
+	local members = GetNumGroupMembers()
+	if members == 2 or members == 3 then
+		return members
+	end
+end
+
+local function FormatRecord(record, one, many)
+	if record[1] == 1 then
+		return sformat(one, record[2], record[3])
+	elseif record[1] > 1 then
+		return sformat(many, record[1], record[2], record[3])
+	end
+end
+
+function RE:CheckArenaPlayers()
+	if ArenaAlertDone() or select(2, IsInInstance()) ~= "arena" or IsSoloShuffle() or not IsRatedArena() or IsArenaSkirmish() or IsInBrawl() then
+		return
+	end
+	-- A state without a team size was started by the Solo Shuffle scoreboard, so this match is a shuffle
+	if RE.ArenaSeen and not RE.ArenaSeen.Size then
+		return
+	end
+	if not RE.ArenaSeen then
+		local size = GetArenaTeamSize()
+		if not size then
+			return
+		end
+		RE.ArenaSeen = {["Seen"] = {}, ["Num"] = 0, ["Total"] = size * 2 - 1, ["Size"] = size}
+	end
+	local size = RE.ArenaSeen.Size
+	local pending, order = {}, {}
+	local function Add(unit)
+		local name = GetUnitFullName(unit)
+		local key = MarkNewPlayer(name)
+		if key then
+			local class = select(2, UnitClass(unit))
+			if issecretvalue and issecretvalue(class) then
+				class = nil
+			end
+			pending[key] = {["Name"] = name, ["Class"] = class, ["With"] = {0, 0, 0}, ["Against"] = {0, 0, 0}}
+			tinsert(order, pending[key])
+		end
+	end
+	for i=1, size - 1 do
+		Add("party"..i)
+	end
+	for i=1, size do
+		Add("arena"..i)
+	end
+	if #order == 0 then
+		return
+	end
+	-- One pass for the whole batch so a large history does not cause a hitch
+	for i=1, #RE.Database do
+		local data = RE.Database[i]
+		if data.isArena and not data.isSoloShuffle and data.PlayersNum == size * 2 and not data.Hidden and data.PlayerSide and type(data.Players) == "table" then
+			local win = RE:GetPlayerWin(i, false)
+			for j=1, #data.Players do
+				local row = data.Players[j]
+				local entry = type(row) == "table" and type(row[1]) == "string" and pending[slower(row[1])]
+				if entry then
+					local record = row[6] == data.PlayerSide and entry.With or entry.Against
+					record[1] = record[1] + 1
+					if win then
+						record[2] = record[2] + 1
+					else
+						record[3] = record[3] + 1
+					end
+				end
+			end
+		end
+	end
+	for _, entry in ipairs(order) do
+		local with = FormatRecord(entry.With, L["with you 1 game (%d-%d)"], L["with you %d games (%d-%d)"])
+		local against = FormatRecord(entry.Against, L["against you 1 game (%d-%d)"], L["against you %d games (%d-%d)"])
+		local text = with and against and with..", "..against or with or against
+		if text then
+			print("\124cFF74D06C[REFlex]\124r "..RE:GetPlayerLink(entry.Name, entry.Class)..": "..text)
+		end
+	end
+end
+
+function RE:GetPlayerLink(name, class)
+	-- Hex keeps the payload free of ':' and '|' whatever characters the name has
+	local link = "|Haddon:REFlex:"..(sgsub(name, ".", function(c) return sformat("%02X", sbyte(c)) end)).."|h["..(sgsub(name, "|", "||")).."]|h"
+	if class and RAID_CLASS_COLORS[class] then
+		link = "|c"..RAID_CLASS_COLORS[class].colorStr..link.."|r"
+	end
+	return link
+end
+
+function RE:OnSetItemRef(link)
+	local linkType, addon, payload = strsplit(":", link)
+	if linkType ~= "addon" or addon ~= "REFlex" or not payload or #payload % 2 ~= 0 or not sfind(payload, "^%x+$") then
+		return
+	end
+	RE:ShowPlayerSearch((sgsub(payload, "%x%x", function(h) return schar(tonumber(h, 16)) end)))
+end
+
+function RE:ShowPlayerSearch(name)
+	-- Names from units on the user's own realm have none; adding it keeps namesakes from other realms out
+	local realm = GetNormalizedRealmName()
+	if realm and not sfind(name, "-", 1, true) then
+		name = name.."-"..realm
+	end
+	PanelTemplates_SetTab(REFlexFrame, 4)
+	-- Shuffle games are hidden under the 2v2/3v3 brackets; the redraw below also covers a bracket-only change
+	RE.Settings.Filters.Bracket = 1
+	RE.BracketDropDown:SetValue(1)
+	RE.PlayerSearchBox:SetText(name)
+	RE:SetPlayerSearch(name, true)
+	if REFlexFrame:IsShown() then
+		RE:UpdateGUI()
+	else
+		REFlexFrame:Show()
+	end
 end
 
 function RE:FilterDefault(rowdata)

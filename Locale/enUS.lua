@@ -21,6 +21,7 @@ L["Purge previous seasons"] = true
 L["WARNING! This operation is not reversible!"] = true
 L["Arena composition statistics limit"] = true
 L["A minimal number of matches required to be included in arena team composition statistics."] = true
+L["Announce players met before in arenas"] = true
 
 L["Show main window"] = true
 L["New version released!"] = true
@@ -31,6 +32,12 @@ L["SHIFT + ALT + CTRL + CLICK will hide the match."] = true
 L["Select start and end date by clicking it."] = true
 L["API returned corrupted data. Match will not be recorded."] = true
 L["Are you sure you want to hide this entry?"] = true
+L["%s: 1 previous game (%d-%d rounds)"] = true
+L["%s: %d previous games (%d-%d rounds)"] = true
+L["with you 1 game (%d-%d)"] = true
+L["with you %d games (%d-%d)"] = true
+L["against you 1 game (%d-%d)"] = true
+L["against you %d games (%d-%d)"] = true
 
 L["Easiest teams"] = true
 L["Hardest teams"] = true

@@ -81,6 +81,7 @@ RE.LDBB = ""
 RE.LDBUpdate = true
 RE.LDBData = {["Won"] = 0, ["Lost"] = 0, ["HK"] = 0, ["Honor"] = 0}
 RE.PlayerSearchText = ""
+RE.ShuffleRetry = false
 
 RE.PlayerName = UnitName("PLAYER"):lower()
 RE.PlayerFaction = UnitFactionGroup("PLAYER") == "Horde" and 0 or 1
@@ -112,6 +113,7 @@ function RE:OnLoad(self)
 	self:RegisterEvent("CHAT_MSG_ADDON")
 	self:RegisterEvent("PVP_RATED_STATS_UPDATE")
 	self:RegisterEvent("CURRENCY_DISPLAY_UPDATE")
+	self:RegisterEvent("UPDATE_BATTLEFIELD_SCORE")
 	self:RegisterForDrag("LeftButton")
 	tinsert(UISpecialFrames,"REFlexFrame")
 
@@ -249,6 +251,7 @@ function RE:OnEvent(_, event, ...)
 		LibStub("AceConfigRegistry-3.0"):RegisterOptionsTable("REFlex", RE.AceConfig)
 		RE.OptionsMenu = LibStub("AceConfigDialog-3.0"):AddToBlizOptions("REFlex", "REFlex")
 		RegisterAddonMessagePrefix("REFlex")
+		EventRegistry:RegisterCallback("SetItemRef", function(_, link) RE:OnSetItemRef(link) end, RE)
 		BINDING_NAME_REFLEXOPEN = L["Show main window"]
 		SlashCmdList["REFLEX"] = function()
 			if not REFlexFrame:IsVisible() then
@@ -385,6 +388,10 @@ function RE:OnEvent(_, event, ...)
 		RequestPVPRewards()
 		RequestRandomBattlegroundInstanceInfo()
 		GetAvailableBrawlInfo()
+		-- A /reload inside an arena does not fire ZONE_CHANGED_NEW_AREA
+		if select(2, IsInInstance()) == "arena" then
+			RE:StartArenaAlert()
+		end
 	elseif event == "ADDON_LOADED" and ... == "Blizzard_Calendar" then
 		hooksecurefunc("CalendarDayButton_Click", RE.CalendarParser)
 		CalendarFrame:HookScript("OnHide", RE.CalendarCleanup)
@@ -400,6 +407,13 @@ function RE:OnEvent(_, event, ...)
 	elseif event == "ZONE_CHANGED_NEW_AREA" then
 		local _, instanceType = IsInInstance()
 		RE.DataSaved = false
+		if instanceType ~= "arena" then
+			RE.ArenaSeen = nil
+			RE.ShuffleRetry = false
+			REFlexFrame:UnregisterEvent("GROUP_ROSTER_UPDATE")
+			REFlexFrame:UnregisterEvent("ARENA_OPPONENT_UPDATE")
+			REFlexFrame:UnregisterEvent("UNIT_NAME_UPDATE")
+		end
 		if RE.Match then
 			RE.Match = false
 			RequestRatedInfo()
@@ -413,6 +427,9 @@ function RE:OnEvent(_, event, ...)
 				SendAddonMessage("REFlex", "Version;"..RE.Version, "GUILD")
 			end
 			REFlexBGFrameText:SetText("")
+			if instanceType == "arena" then
+				RE:StartArenaAlert()
+			end
 		end
 	elseif event == "PVP_MATCH_COMPLETE" and not RE.DataSaved then
 		RE.DataSaved = true
@@ -434,6 +451,10 @@ function RE:OnEvent(_, event, ...)
 		if currency and quantity and currency == 1792 and quantity > 0 then
 			RE:ParseHonor(quantity)
 		end
+	elseif event == "UPDATE_BATTLEFIELD_SCORE" then
+		RE:CheckShuffleOpponents()
+	elseif event == "GROUP_ROSTER_UPDATE" or event == "ARENA_OPPONENT_UPDATE" or event == "UNIT_NAME_UPDATE" then
+		RE:CheckArenaPlayers()
 	end
 end
 

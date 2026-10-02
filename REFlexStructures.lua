@@ -17,6 +17,7 @@ RE.DefaultConfig = {
 	["LDBSide"] = "A",
 	["ArenaStatsLimit"] = 3,
 	["ForceCivilisedClock"] = false,
+	["ShuffleAlert"] = true,
 	["ConfigVersion"] = RE.Version
 }
 
@@ -237,12 +238,20 @@ RE.AceConfig = {
 			set = function(_, val) RE.Settings.ForceCivilisedClock = val end,
 			get = function(_) return RE.Settings.ForceCivilisedClock end
 		},
+		shufflealert = {
+			name = L["Announce players met before in arenas"],
+			type = "toggle",
+			width = "full",
+			order = 4,
+			set = function(_, val) RE.Settings.ShuffleAlert = val end,
+			get = function(_) return RE.Settings.ShuffleAlert ~= false end
+		},
 		arenalimit = {
 			name = L["Arena composition statistics limit"],
 			desc = L["A minimal number of matches required to be included in arena team composition statistics."],
 			type = "range",
 			width = "double",
-			order = 4,
+			order = 5,
 			min = 1,
 			max = 10,
 			step = 1,
@@ -254,7 +263,7 @@ RE.AceConfig = {
 			desc = L["Rating display always compares the values with the previous week."],
 			type = "select",
 			width = "double",
-			order = 5,
+			order = 6,
 			values = {
 				[1] = L["Current session"],
 				[2] = HONOR_TODAY,
@@ -269,7 +278,7 @@ RE.AceConfig = {
 			type = "execute",
 			width = "double",
 			confirm = true,
-			order = 6,
+			order = 7,
 			func = function() REFlexDatabase = {}; REFlexHonorDatabase = {}; ReloadUI() end
 		},
 		deleteoldseason = {
@@ -278,7 +287,7 @@ RE.AceConfig = {
 			type = "execute",
 			width = "double",
 			confirm = true,
-			order = 7,
+			order = 8,
 			func = function() RE:SeasonPurge(); ReloadUI() end
 		}
 	}

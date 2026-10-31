@@ -38,6 +38,7 @@ L["with you 1 game (%d-%d)"] = true
 L["with you %d games (%d-%d)"] = true
 L["against you 1 game (%d-%d)"] = true
 L["against you %d games (%d-%d)"] = true
+L["Check REFlex"] = true
 
 L["Easiest teams"] = true
 L["Hardest teams"] = true

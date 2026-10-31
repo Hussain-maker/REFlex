@@ -29,6 +29,8 @@ local TimerAfter = C_Timer.After
 local issecretvalue = issecretvalue
 local UnitName = UnitName
 local UnitClass = UnitClass
+local UnitIsPlayer = UnitIsPlayer
+local UnitIsUnit = UnitIsUnit
 local IsRatedArena = C_PvP.IsRatedArena
 local IsArenaSkirmish = IsArenaSkirmish
 local GetBattlefieldStatus = GetBattlefieldStatus
@@ -929,6 +931,50 @@ function RE:ShowPlayerSearch(name)
 		RE:UpdateGUI()
 	else
 		REFlexFrame:Show()
+	end
+end
+
+local UNIT_MENU_TAGS = {"MENU_UNIT_PLAYER", "MENU_UNIT_ENEMY_PLAYER", "MENU_UNIT_PARTY", "MENU_UNIT_RAID_PLAYER"}
+
+local function GetMenuPlayerName(contextData)
+	local unit = contextData.unit
+	if unit then
+		local isPlayer, isSelf = UnitIsPlayer(unit), UnitIsUnit(unit, "player")
+		if (issecretvalue and (issecretvalue(isPlayer) or issecretvalue(isSelf))) or not isPlayer or isSelf then
+			return nil
+		end
+	end
+	local name, server = contextData.name, contextData.server
+	local fullName
+	if type(name) == "string" and not (issecretvalue and (issecretvalue(name) or issecretvalue(server))) and name ~= "" then
+		fullName = name
+		if type(server) == "string" and server ~= "" and not sfind(name, "-", 1, true) then
+			fullName = name.."-"..server
+		end
+	elseif unit then
+		fullName = GetUnitFullName(unit)
+	end
+	if not fullName or fullName == "" or fullName == UNKNOWNOBJECT then
+		return nil
+	end
+	return fullName
+end
+
+local function AddCheckButton(_, rootDescription, contextData)
+	local name = contextData and GetMenuPlayerName(contextData)
+	if name then
+		rootDescription:CreateDivider()
+		-- The name is captured now so the click still works if the unit changes before it
+		rootDescription:CreateButton(L["Check REFlex"], function() RE:ShowPlayerSearch(name) end)
+	end
+end
+
+function RE:AddUnitMenus()
+	if not (Menu and Menu.ModifyMenu) then
+		return
+	end
+	for _, tag in ipairs(UNIT_MENU_TAGS) do
+		Menu.ModifyMenu(tag, AddCheckButton)
 	end
 end
 

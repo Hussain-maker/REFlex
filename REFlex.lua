@@ -252,6 +252,7 @@ function RE:OnEvent(_, event, ...)
 		RE.OptionsMenu = LibStub("AceConfigDialog-3.0"):AddToBlizOptions("REFlex", "REFlex")
 		RegisterAddonMessagePrefix("REFlex")
 		EventRegistry:RegisterCallback("SetItemRef", function(_, link) RE:OnSetItemRef(link) end, RE)
+		RE:AddUnitMenus()
 		BINDING_NAME_REFLEXOPEN = L["Show main window"]
 		SlashCmdList["REFLEX"] = function()
 			if not REFlexFrame:IsVisible() then
